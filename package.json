@@ -3,10 +3,14 @@
   "version": "1.0.50",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "dev": "bun run --watch src/index.ts"
+    "dev": "bun run --watch src/index.ts",
+    "dev:arctic": "bun run --watch src/arctic/index.ts",
+    "dev:googleapis": "bun run --watch src/googleapis/index.ts"
   },
   "dependencies": {
-    "elysia": "latest"
+    "arctic": "^2.0.0-next.5",
+    "elysia": "latest",
+    "googleapis": "^140.0.1"
   },
   "devDependencies": {
     "bun-types": "latest"
