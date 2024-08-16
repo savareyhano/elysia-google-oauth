@@ -5,7 +5,18 @@ import { Elysia } from 'elysia'
 import crypto from 'crypto'
 import querystring from 'querystring'
 
-const getGoogleAuthURL = (state: string) => {
+const generateCodeVerifier = () => {
+  return crypto.randomBytes(32).toString('hex')
+}
+
+const generateCodeChallenge = (codeVerifier: string) => {
+  return crypto.createHash('sha256').update(codeVerifier).digest('base64url') // base64url encoding, which is URL-safe
+}
+
+const getGoogleAuthURL = (state: string, codeVerifier: string) => {
+  // Generate code challenge from code verifier
+  const codeChallenge = generateCodeChallenge(codeVerifier)
+
   // More info:
   // https://accounts.google.com/.well-known/openid-configuration
   const rootUrl = 'https://accounts.google.com/o/oauth2/v2/auth'
@@ -25,12 +36,15 @@ const getGoogleAuthURL = (state: string) => {
     ].join(' '),
     // Using state to reduce the risk of CSRF attacks.
     state,
+    // PKCE parameters
+    code_challenge: codeChallenge,
+    code_challenge_method: 'S256',
   }
 
   return `${rootUrl}?${querystring.stringify(options)}`
 }
 
-const getTokens = async (code: string) => {
+const getTokens = async (code: string, codeVerifier: string) => {
   try {
     // Uses the code to get tokens
     // that can be used to fetch the user's profile
@@ -43,6 +57,7 @@ const getTokens = async (code: string) => {
       client_secret: process.env.GOOGLE_CLIENT_SECRET,
       redirect_uri: process.env.GOOGLE_REDIRECT_URI,
       grant_type: 'authorization_code',
+      code_verifier: codeVerifier,
     }
 
     const getTokens = await fetch(tokenURL, {
@@ -140,35 +155,59 @@ const getDiscordUser = async (access_token: string) => {
 const app = new Elysia()
   .get('/', () => 'Hello Elysia')
   // Getting login URL
-  .get('/auth/google', ({ redirect, cookie: { google_state } }) => {
-    const state = crypto.randomBytes(32).toString('hex')
+  .get(
+    '/auth/google',
+    ({ redirect, cookie: { google_state, google_code_verifier } }) => {
+      const state = crypto.randomBytes(32).toString('hex')
+      const codeVerifier = generateCodeVerifier()
 
-    const url = getGoogleAuthURL(state)
+      const url = getGoogleAuthURL(state, codeVerifier)
 
-    google_state.value = state
-    google_state.set({
-      secure: false, // set to true in production
-      path: '/',
-      httpOnly: true,
-      maxAge: 60 * 10, // 10 min
-    })
+      google_state.value = state
+      google_state.set({
+        secure: false, // set to true in production
+        path: '/',
+        httpOnly: true,
+        maxAge: 60 * 10, // 10 min
+      })
 
-    return redirect(url)
-  })
-  // Getting the user from Google with the code
-  .get('/auth/google/callback', async ({ query, cookie: { google_state } }) => {
-    const { code, state } = query
-    const storedState = google_state.value
+      google_code_verifier.value = codeVerifier
+      google_code_verifier.set({
+        secure: false, // set to true in production
+        path: '/',
+        httpOnly: true,
+        maxAge: 60 * 10, // 10 min
+      })
 
-    if (code === null || storedState === null || state !== storedState) {
-      // 400
-      throw new Error('Invalid request')
+      return redirect(url)
     }
+  )
+  // Getting the user from Google with the code
+  .get(
+    '/auth/google/callback',
+    async ({ query, cookie: { google_state, google_code_verifier } }) => {
+      const { code, state } = query
+      const storedState = google_state.value
+      const storedCodeVerifier = google_code_verifier.value
 
-    const { id_token, access_token } = await getTokens(code as string)
+      if (
+        code === null ||
+        storedState === null ||
+        state !== storedState ||
+        storedCodeVerifier === null
+      ) {
+        // 400
+        throw new Error('Invalid request')
+      }
 
-    return await getGoogleUser(access_token, id_token)
-  })
+      const { id_token, access_token } = await getTokens(
+        code as string,
+        storedCodeVerifier as string
+      )
+
+      return await getGoogleUser(access_token, id_token)
+    }
+  )
   .get('/auth/discord', ({ redirect, cookie: { discord_state } }) => {
     const state = crypto.randomBytes(32).toString('hex')
 
