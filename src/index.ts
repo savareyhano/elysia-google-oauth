@@ -78,6 +78,8 @@ const getGoogleUser = async (access_token: string, id_token: string) => {
 }
 
 const getDiscordAuthURL = (state: string) => {
+  // More info:
+  // https://discord.com/developers/docs/topics/oauth2
   const rootUrl = 'https://discord.com/oauth2/authorize'
   const options = {
     response_type: 'code',
@@ -94,6 +96,8 @@ const getDiscordAuthURL = (state: string) => {
 
 const getDiscordTokens = async (code: string) => {
   try {
+    // More info:
+    // https://discord.com/developers/docs/topics/oauth2
     const tokenURL = 'https://discord.com/api/oauth2/token'
     const values = {
       code,
