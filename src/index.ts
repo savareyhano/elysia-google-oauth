@@ -5,12 +5,19 @@ import { Elysia } from 'elysia'
 import crypto from 'crypto'
 import querystring from 'querystring'
 
-const generateCodeVerifier = () => {
+const generateState = () => {
   return crypto.randomBytes(32).toString('hex')
 }
 
+const generateCodeVerifier = () => {
+  return crypto.randomBytes(32).toString('base64url')
+}
+
 const generateCodeChallenge = (codeVerifier: string) => {
-  return crypto.createHash('sha256').update(codeVerifier).digest('base64url') // base64url encoding, which is URL-safe
+  return crypto
+    .createHash('sha256')
+    .update(codeVerifier, 'ascii')
+    .digest('base64url')
 }
 
 const getGoogleAuthURL = (state: string, codeVerifier: string) => {
@@ -165,7 +172,7 @@ const app = new Elysia()
   .get(
     '/auth/google',
     ({ redirect, cookie: { google_state, google_code_verifier } }) => {
-      const state = crypto.randomBytes(32).toString('hex')
+      const state = generateState()
       const codeVerifier = generateCodeVerifier()
 
       const url = getGoogleAuthURL(state, codeVerifier)
@@ -215,30 +222,33 @@ const app = new Elysia()
       return await getGoogleUser(access_token, id_token)
     }
   )
-  .get('/auth/discord', ({ redirect, cookie: { discord_state, discord_code_verifier } }) => {
-    const state = crypto.randomBytes(32).toString('hex')
-    const codeVerifier = generateCodeVerifier()
+  .get(
+    '/auth/discord',
+    ({ redirect, cookie: { discord_state, discord_code_verifier } }) => {
+      const state = generateState()
+      const codeVerifier = generateCodeVerifier()
 
-    const url = getDiscordAuthURL(state, codeVerifier)
+      const url = getDiscordAuthURL(state, codeVerifier)
 
-    discord_state.value = state
-    discord_state.set({
-      secure: false, // set to true in production
-      path: '/',
-      httpOnly: true,
-      maxAge: 60 * 10, // 10 min
-    })
+      discord_state.value = state
+      discord_state.set({
+        secure: false, // set to true in production
+        path: '/',
+        httpOnly: true,
+        maxAge: 60 * 10, // 10 min
+      })
 
-    discord_code_verifier.value = codeVerifier
-    discord_code_verifier.set({
-      secure: false, // set to true in production
-      path: '/',
-      httpOnly: true,
-      maxAge: 60 * 10, // 10 min
-    })
+      discord_code_verifier.value = codeVerifier
+      discord_code_verifier.set({
+        secure: false, // set to true in production
+        path: '/',
+        httpOnly: true,
+        maxAge: 60 * 10, // 10 min
+      })
 
-    return redirect(url)
-  })
+      return redirect(url)
+    }
+  )
   .get(
     '/auth/discord/callback',
     async ({ query, cookie: { discord_state, discord_code_verifier } }) => {
@@ -256,7 +266,10 @@ const app = new Elysia()
         throw new Error('Invalid request')
       }
 
-      const { access_token } = await getDiscordTokens(code as string, storedCodeVerifier as string)
+      const { access_token } = await getDiscordTokens(
+        code as string,
+        storedCodeVerifier as string
+      )
 
       return await getDiscordUser(access_token)
     }
