@@ -77,6 +77,62 @@ const getGoogleUser = async (access_token: string, id_token: string) => {
   }
 }
 
+const getDiscordAuthURL = (state: string) => {
+  const rootUrl = 'https://discord.com/oauth2/authorize'
+  const options = {
+    response_type: 'code',
+    client_id: process.env.DISCORD_CLIENT_ID,
+    scope: ['identify', 'email'].join(' '),
+    state,
+    redirect_uri: process.env.DISCORD_REDIRECT_URI,
+    prompt: 'consent',
+    integration_type: '0',
+  }
+
+  return `${rootUrl}?${querystring.stringify(options)}`
+}
+
+const getDiscordTokens = async (code: string) => {
+  try {
+    const tokenURL = 'https://discord.com/api/oauth2/token'
+    const values = {
+      code,
+      grant_type: 'authorization_code',
+      redirect_uri: process.env.DISCORD_REDIRECT_URI,
+      client_id: process.env.DISCORD_CLIENT_ID,
+      client_secret: process.env.DISCORD_CLIENT_SECRET,
+    }
+
+    const getDiscordTokens = await fetch(tokenURL, {
+      method: 'POST',
+      body: querystring.stringify(values),
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+    })
+
+    return await getDiscordTokens.json()
+  } catch (error) {
+    console.log(error)
+  }
+}
+
+const getDiscordUser = async (access_token: string) => {
+  // More info:
+  // https://discord.com/developers/docs/resources/user#get-current-user
+  try {
+    const getDiscordUser = await fetch('https://discord.com/api/users/@me', {
+      headers: {
+        Authorization: `Bearer ${access_token}`,
+      },
+    })
+
+    return await getDiscordUser.json()
+  } catch (error) {
+    console.log(error)
+  }
+}
+
 const app = new Elysia()
   .get('/', () => 'Hello Elysia')
   // Getting login URL
@@ -109,6 +165,37 @@ const app = new Elysia()
 
     return await getGoogleUser(access_token, id_token)
   })
+  .get('/auth/discord', ({ redirect, cookie: { discord_state } }) => {
+    const state = crypto.randomBytes(32).toString('hex')
+
+    const url = getDiscordAuthURL(state)
+
+    discord_state.value = state
+    discord_state.set({
+      secure: false, // set to true in production
+      path: '/',
+      httpOnly: true,
+      maxAge: 60 * 10, // 10 min
+    })
+
+    return redirect(url)
+  })
+  .get(
+    '/auth/discord/callback',
+    async ({ query, cookie: { discord_state } }) => {
+      const { code, state } = query
+      const storedState = discord_state.value
+
+      if (code === null || storedState === null || state !== storedState) {
+        // 400
+        throw new Error('Invalid request')
+      }
+
+      const { access_token } = await getDiscordTokens(code as string)
+
+      return await getDiscordUser(access_token)
+    }
+  )
   .listen(3000)
 
 console.log(
